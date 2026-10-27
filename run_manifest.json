@@ -1,0 +1,53 @@
+{
+  "generated_at": "2026-10-12T19:42:07",
+  "master_seed": 20260924,
+  "python": "3.13.16",
+  "numpy": "2.5.3",
+  "pandas": "3.0.5",
+  "tables": {
+    "dim_hotel": {
+      "rows": 2,
+      "md5": "b375aa1c002fe0aeefecaddb204a74be"
+    },
+    "dim_date": {
+      "rows": 1515,
+      "md5": "f88caa414d0477764ddd79fd94d84427"
+    },
+    "ref_market_segment": {
+      "rows": 7,
+      "md5": "9e4ec0d33a7d198e0607608bafa1757e"
+    },
+    "ref_distribution_channel": {
+      "rows": 4,
+      "md5": "a312597c219955b2a8855bdc22a7abe5"
+    },
+    "ref_deposit_type": {
+      "rows": 3,
+      "md5": "595dab237c04568fa7251e48a067ae0d"
+    },
+    "dim_cost_parameter": {
+      "rows": 2,
+      "md5": "6eff79f10cb4904d12a7092f7c4ea05b"
+    },
+    "fact_booking": {
+      "rows": 60000,
+      "md5": "9214fe033b6a05bb72e009bf2f72fc86"
+    },
+    "fact_reservation_snapshot": {
+      "rows": 355102,
+      "md5": "94e5cf3f74ee647fcfd125e48f3a8b8c"
+    },
+    "fact_daily_stay": {
+      "rows": 1603,
+      "md5": "5bd8daf2ea906c7febc9565bd4569fdd"
+    },
+    "fact_walk_event": {
+      "rows": 28,
+      "md5": "1a064d6cc350c45ae5fe7d53c76856dd"
+    },
+    "fact_overbooking_recommendation": {
+      "rows": 1603,
+      "md5": "957b2e5a1eb7690c74baf9a2261b523e"
+    }
+  }
+}

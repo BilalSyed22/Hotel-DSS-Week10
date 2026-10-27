@@ -1,0 +1,3 @@
+param_id,hotel_id,contribution_margin_pct,spoilage_cost_per_room,walk_cost_mult_low,walk_cost_mult_high,provenance,effective_date
+1,1,0.7,71.09,1.0,3.0,expert_assumption (margin to be sourced),2015-07-01
+2,2,0.7,76.89,1.0,3.0,expert_assumption (margin to be sourced),2015-07-01

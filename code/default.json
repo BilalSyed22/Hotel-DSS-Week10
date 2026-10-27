@@ -1,0 +1,52 @@
+{
+  "master_seed": 20260924,
+  "date_start": "2015-07-01",
+  "date_end": "2017-08-31",
+  "capacity_percentile": 0.98,
+  "snapshot_offsets_days": [120, 90, 60, 30, 14, 7, 3, 1],
+  "walk_cost_multiplier_low": 1.0,
+  "walk_cost_multiplier_high": 3.0,
+  "contribution_margin_pct": 0.70,
+  "hotels": {
+    "Resort": {
+      "hotel_id": 1,
+      "n_bookings": 26000,
+      "target_cancel_rate": 0.278,
+      "noshow_rate_overall": 0.0073,
+      "lead_time_mean": 92.7,
+      "adr_mean": 95.0,
+      "adr_cv": 0.55,
+      "stay_week_mean": 3.13,
+      "stay_weekend_mean": 1.19,
+      "repeated_guest_rate": 0.0444,
+      "special_req_mean": 0.62,
+      "segment_prop": {"Online TA": 0.42, "Offline TA/TO": 0.20, "Direct": 0.17, "Groups": 0.11, "Corporate": 0.08, "Complementary": 0.02},
+      "segment_cancel": {"Online TA": 0.352, "Offline TA/TO": 0.152, "Direct": 0.135, "Groups": 0.424, "Corporate": 0.152, "Complementary": 0.164},
+      "channel_prop": {"TA/TO": 0.78, "Direct": 0.16, "Corporate": 0.05, "GDS": 0.01},
+      "deposit_prop": {"No Deposit": 0.88, "Non Refund": 0.11, "Refundable": 0.01},
+      "customer_prop": {"Transient": 0.71, "Transient-Party": 0.21, "Contract": 0.06, "Group": 0.02},
+      "meal_prop": {"BB": 0.62, "HB": 0.25, "FB": 0.08, "SC": 0.05},
+      "month_arrival_prop": {"January": 0.05, "February": 0.06, "March": 0.08, "April": 0.09, "May": 0.09, "June": 0.09, "July": 0.11, "August": 0.12, "September": 0.09, "October": 0.09, "November": 0.06, "December": 0.07}
+    },
+    "City": {
+      "hotel_id": 2,
+      "n_bookings": 34000,
+      "target_cancel_rate": 0.417,
+      "noshow_rate_overall": 0.0115,
+      "lead_time_mean": 109.7,
+      "adr_mean": 105.3,
+      "adr_cv": 0.50,
+      "stay_week_mean": 2.18,
+      "stay_weekend_mean": 0.80,
+      "repeated_guest_rate": 0.0256,
+      "special_req_mean": 0.55,
+      "segment_prop": {"Online TA": 0.48, "Offline TA/TO": 0.16, "Groups": 0.14, "Direct": 0.12, "Corporate": 0.08, "Complementary": 0.01, "Aviation": 0.01},
+      "segment_cancel": {"Online TA": 0.374, "Offline TA/TO": 0.428, "Groups": 0.689, "Direct": 0.173, "Corporate": 0.215, "Complementary": 0.118, "Aviation": 0.219},
+      "channel_prop": {"TA/TO": 0.82, "Direct": 0.13, "Corporate": 0.04, "GDS": 0.01},
+      "deposit_prop": {"No Deposit": 0.84, "Non Refund": 0.16},
+      "customer_prop": {"Transient": 0.76, "Transient-Party": 0.18, "Contract": 0.05, "Group": 0.01},
+      "meal_prop": {"BB": 0.77, "HB": 0.12, "SC": 0.10, "FB": 0.01},
+      "month_arrival_prop": {"January": 0.06, "February": 0.07, "March": 0.09, "April": 0.10, "May": 0.11, "June": 0.09, "July": 0.09, "August": 0.09, "September": 0.10, "October": 0.10, "November": 0.06, "December": 0.06}
+    }
+  }
+}

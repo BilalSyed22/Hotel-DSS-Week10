@@ -1,0 +1,5 @@
+{
+  "master_seed": 20260924,
+  "cancellation_coeffs": "see generate.py gen_hotel()",
+  "capacity_percentile": 0.98
+}

@@ -1,0 +1,4 @@
+deposit_type_code,cancel_risk_note
+No Deposit,no prepayment
+Non Refund,"prepaid, non-refundable (very high cancel risk)"
+Refundable,refundable deposit
