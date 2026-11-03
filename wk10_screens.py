@@ -27,9 +27,12 @@ BASE_DIR = Path(__file__).resolve().parent
 # Model loading and SHAP helpers
 # --------------------------------------------------------------------------
 @st.cache_resource
-def load_wk10_models():
-    return (joblib.load(BASE_DIR / "cancellation_model.pkl"),
-            joblib.load(BASE_DIR / "occupancy_model.pkl"))
+def load_wk11_models():
+    return (
+        joblib.load(BASE_DIR / "cancellation_model_wk11.pkl"),
+        joblib.load(BASE_DIR / "occupancy_model_wk11.pkl"),
+    )
+
 
 
 def _transform(bundle, row_df):
@@ -123,6 +126,30 @@ def cancel_inputs(bookings, defaults):
                               index=defaults["is_repeated_guest"],
                               format_func=lambda x: "Yes" if x else "No")
         special = st.slider("Special requests", 0, 5, defaults["total_special_requests"])
+    
+    # Week 11 scenario validation
+    total_guests = adults + children
+
+    if total_guests > 4:
+        st.warning(
+            "This scenario includes more than four guests. "
+            "Room capacity or room-type requirements should "
+            "be verified before using this prediction."
+        )
+
+    if prev > 0 and repeat == 0:
+        st.warning(
+            "Previous cancellations are greater than zero "
+            "while Repeat Guest is set to No. "
+            "Please verify the guest-history definition."
+        )
+
+    st.caption(
+        "Historical guest characteristics are not directly "
+        "controllable. Scenario differences show model "
+        "predictions, not proven causal effects."
+    )
+
     return pd.DataFrame([{
         "lead_time": lead, "adr": adr, "adults": adults, "children": children,
         "previous_cancellations": prev, "is_repeated_guest": repeat,
@@ -130,25 +157,76 @@ def cancel_inputs(bookings, defaults):
         "hotel_id": defaults["hotel_id"], "segment_code": segment,
         "channel_code": channel, "deposit_type_code": deposit}])
 
-
 def occ_inputs(defaults):
-    seasons = ["Winter", "Spring", "Summer", "Autumn"]
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        month = st.slider("Month (1–12)", 1, 12, defaults["month"])
-        season = st.selectbox("Season", seasons, index=seasons.index(defaults["season"]))
-    with c2:
-        weekend = st.selectbox("Weekend night?", [0, 1], index=defaults["is_weekend"],
-                               format_func=lambda x: "Yes" if x else "No")
-        week = st.slider("Week number", 1, 53, defaults["week_number"])
-    with c3:
-        dom = st.slider("Day of month", 1, 31, defaults["day_of_month"])
-        year = st.selectbox("Year", [2015, 2016, 2017],
-                            index=[2015, 2016, 2017].index(defaults["year"]))
+    """
+    Occupancy what-if input panel.
+
+    The user selects a valid stay date.
+    Calendar features are derived automatically
+    to prevent inconsistent scenarios.
+    """
+    from datetime import date
+    import calendar
+
+    st.markdown("#### Occupancy Scenario")
+
+    st.caption(
+        "Select a stay date. Month, season, week number, "
+        "and weekend status are calculated automatically."
+    )
+
+    # Construct the original baseline date
+    default_date = date(
+        int(defaults["year"]),
+        int(defaults["month"]),
+        min(
+            int(defaults["day_of_month"]),
+            calendar.monthrange(
+                int(defaults["year"]),
+                int(defaults["month"])
+            )[1]
+        )
+    )
+
+    selected_date = st.date_input(
+        "Stay date",
+        value=default_date,
+        min_value=date(2015, 1, 1),
+        max_value=date(2017, 12, 31),
+    )
+
+    month = selected_date.month
+    week = selected_date.isocalendar().week
+    dom = selected_date.day
+    year = selected_date.year
+    weekend = int(selected_date.weekday() >= 5)
+
+    season_map = {
+        12: "Winter", 1: "Winter", 2: "Winter",
+        3: "Spring", 4: "Spring", 5: "Spring",
+        6: "Summer", 7: "Summer", 8: "Summer",
+        9: "Autumn", 10: "Autumn", 11: "Autumn",
+    }
+
+    season = season_map[month]
+
+    st.info(
+        f"Selected date: {selected_date} | "
+        f"Season: {season} | "
+        f"Weekend: {'Yes' if weekend else 'No'} | "
+        f"Week: {week}"
+    )
+
     return pd.DataFrame([{
-        "month": month, "week_number": week, "day_of_month": dom,
-        "is_weekend": weekend, "year": year,
-        "hotel_id": defaults["hotel_id"], "season": season}])
+        "month": month,
+        "week_number": week,
+        "day_of_month": dom,
+        "is_weekend": weekend,
+        "year": year,
+        "hotel_id": defaults["hotel_id"],
+        "season": season,
+    }])
+
 
 
 # --------------------------------------------------------------------------
@@ -162,6 +240,21 @@ def auto_summary(bundle, kpi_name, inputs_row, baseline_pred, scenario_pred, top
                         for _, r in top_local.head(3).iterrows())
     unit = "percentage points" if bundle["task"] == "classification" else "occupancy points"
     delta = abs(change) * 100
+    
+    if bundle["task"] == "classification":
+        decision_note = (
+            "The revenue manager may use the predicted "
+            "cancellation risk to review reservation "
+            "confirmation and overbooking decisions."
+        )
+    else:
+        decision_note = (
+            "The occupancy forecast may help inform "
+            "inventory and pricing discussions, but the "
+            "model showed limited performance stability "
+            "on the final test period."
+        )
+
     lines = [
         f"**Scenario inputs:** {inp}.",
         f"**Baseline {kpi_name}:** {fmt(bundle, baseline_pred)}.",
@@ -179,7 +272,8 @@ def auto_summary(bundle, kpi_name, inputs_row, baseline_pred, scenario_pred, top
         "**Limitations.** This is a model-based scenario, not a guaranteed real-world outcome. "
         "The contributions show association learned from historical synthetic data, not cause "
         "and effect. Changing an input shows how the model responds, not what would happen if "
-        "the hotel actually changed that factor.",
+        "the hotel actually changed that factor.", 
+        f"**Decision support:** {decision_note}",
     ]
     return "\n\n".join(lines)
 
@@ -202,13 +296,91 @@ def show_predictive_screen(bookings, hotel_id):
     st.info("Results are model-based scenarios from historical synthetic data. "
             "Predictor contributions show association, not causation.")
 
-    cancel_b, occ_b = load_wk10_models()
+    cancel_b, occ_b = load_wk11_models()
 
     kpi = st.radio("Choose a KPI", ["KPI 1 — Cancellation Probability",
                                     "KPI 2 — Expected Occupancy Rate"], horizontal=True)
     is_cancel = kpi.startswith("KPI 1")
     bundle = cancel_b if is_cancel else occ_b
     kpi_name = "cancellation probability" if is_cancel else "occupancy rate"
+
+    # ============================================
+    # WEEK 11 — MODEL PERFORMANCE DISPLAY
+    # ============================================
+
+    st.subheader("Model Validation Results")
+
+    st.caption(
+        "Performance was evaluated on held-out synthetic "
+        "hotel data using a chronological split. "
+        "Lower Brier Score and MAE indicate better performance."
+    )
+
+    tab_cancel, tab_occ = st.tabs([
+        "Cancellation Model",
+        "Occupancy Model"
+    ])
+
+    with tab_cancel:
+        st.markdown("**Booking Cancellation Probability**")
+
+        st.dataframe(pd.DataFrame([
+            {
+                "Model": "Historical Rate Baseline",
+                "ROC-AUC": 0.5000,
+                "Brier Score": 0.2296,
+            },
+            {
+                "Model": "Gradient Boosting",
+                "ROC-AUC": 0.8763,
+                "Brier Score": 0.1251,
+            },
+        ]), hide_index=True)
+
+        st.success(
+            "The Gradient Boosting model improves probability "
+            "prediction compared with the historical-rate baseline."
+        )
+
+        st.caption(
+            "Limitations: Synthetic data, uncertain real-world "
+            "generalization, and higher prediction errors for "
+            "long-lead-time reservations. Probability calibration "
+            "has not yet been fully assessed."
+        )
+
+    with tab_occ:
+        st.markdown("**Expected Nightly Occupancy Rate**")
+
+        st.dataframe(pd.DataFrame([
+            {
+                "Model": "Historical Hotel Average",
+                "MAE (pp)": 15.6507,
+                "RMSE (pp)": 21.5965,
+                "R²": -0.1548,
+            },
+            {
+                "Model": "Gradient Boosting",
+                "MAE (pp)": 11.3592,
+                "RMSE (pp)": 19.3210,
+                "R²": 0.0757,
+            },
+        ]), hide_index=True)
+
+        st.warning(
+            "The occupancy model outperforms the simple baseline, "
+            "but its low test R² indicates limited predictive "
+            "stability. Use forecasts alongside booking information "
+            "and manager judgment."
+        )
+
+        st.caption(
+            "Limitations: The model uses calendar features only "
+            "and does not incorporate live booking pace, competitor "
+            "prices, or special events."
+        )
+
+
 
     # --- 1. KPI justification + model card ---
     st.subheader("1. The KPI and the model")
@@ -274,6 +446,156 @@ def show_predictive_screen(bookings, hotel_id):
     baseline_pred = predict(bundle, baseline_row)
     scenario_pred = predict(bundle, scenario_row)
     change = scenario_pred - baseline_pred
+    
+    
+    # ============================================
+    # WEEK 11 — SAVE AND COMPARE TWO SCENARIOS
+    # ============================================
+
+    st.markdown("#### Save and Compare Scenarios")
+
+    scenario_key = (
+        "cancel" if is_cancel else f"occupancy_{hotel_id}"
+    )
+
+    if "saved_scenarios" not in st.session_state:
+        st.session_state.saved_scenarios = {}
+
+    if scenario_key not in st.session_state.saved_scenarios:
+        st.session_state.saved_scenarios[scenario_key] = {}
+
+    saved = st.session_state.saved_scenarios[scenario_key]
+
+    col_a, col_b = st.columns(2)
+
+    with col_a:
+        if st.button("Save as Scenario A"):
+            saved["A"] = {
+                "inputs": scenario_row.iloc[0].to_dict(),
+                "prediction": scenario_pred
+            }
+            st.success("Scenario A saved!")
+
+    with col_b:
+        if st.button("Save as Scenario B"):
+            saved["B"] = {
+                "inputs": scenario_row.iloc[0].to_dict(),
+                "prediction": scenario_pred
+            }
+            st.success("Scenario B saved!")
+
+    if "A" in saved and "B" in saved:
+        st.markdown("#### Scenario A vs. Scenario B")
+
+        comparison = pd.DataFrame([
+            {
+                "Scenario": "A",
+                "Prediction": fmt(
+                    bundle, saved["A"]["prediction"]
+                )
+            },
+            {
+                "Scenario": "B",
+                "Prediction": fmt(
+                    bundle, saved["B"]["prediction"]
+                )
+            },
+        ])
+
+        st.dataframe(
+            comparison,
+            hide_index=True,
+            use_container_width=True
+        )
+
+        difference = (
+            saved["B"]["prediction"]
+            - saved["A"]["prediction"]
+        ) * 100
+
+        st.metric(
+            "Scenario B minus Scenario A",
+            f"{difference:+.1f} percentage points"
+        )
+
+        input_comparison = []
+
+        for feature in bundle["features"]:
+            value_a = saved["A"]["inputs"][feature]
+            value_b = saved["B"]["inputs"][feature]
+
+            if value_a != value_b:
+                input_comparison.append({
+                    "Feature": feature,
+                    "Scenario A": value_a,
+                    "Scenario B": value_b,
+                })
+
+        st.markdown("**Inputs that differ between scenarios**")
+
+        if input_comparison:
+            st.dataframe(
+                pd.DataFrame(input_comparison),
+                hide_index=True,
+                use_container_width=True
+            )
+        else:
+            st.info(
+                "Scenario A and Scenario B use identical inputs."
+            )
+
+        st.caption(
+            "These are model-based comparisons using synthetic "
+            "data. Differences are not proven causal effects "
+            "or guaranteed business outcomes."
+        )
+
+    
+    # ============================================
+    # WEEK 11 — SIDE-BY-SIDE INPUT COMPARISON
+    # ============================================
+
+    st.markdown("#### Baseline vs. Scenario Inputs")
+
+    comparison_rows = []
+
+    for feature in bundle["features"]:
+        baseline_value = baseline_row.iloc[0][feature]
+        scenario_value = scenario_row.iloc[0][feature]
+
+        comparison_rows.append({
+            "Feature": feature,
+            "Baseline": baseline_value,
+            "Scenario": scenario_value,
+            "Changed": (
+                "Yes" if baseline_value != scenario_value
+                else "No"
+            ),
+        })
+
+    comparison_df = pd.DataFrame(comparison_rows)
+
+    st.dataframe(
+        comparison_df,
+        hide_index=True,
+        use_container_width=True
+    )
+
+    changed_features = comparison_df[
+        comparison_df["Changed"] == "Yes"
+    ]
+
+    if changed_features.empty:
+        st.info(
+            "No input changes detected. "
+            "The scenario matches the baseline."
+        )
+    else:
+        st.caption(
+            f"{len(changed_features)} input feature(s) "
+            "changed compared with the baseline."
+        )
+
 
     m1, m2, m3 = st.columns(3)
     m1.metric("Baseline prediction", fmt(bundle, baseline_pred))
