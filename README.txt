@@ -372,3 +372,20 @@ For each KPI the app shows:
 New files: train_models_wk10.py, wk10_screens.py, occupancy_model.pkl,
 requirements.txt, SETUP.md, Week10_Progress_Report.docx.
 Run: see SETUP.md  (pip install -r requirements.txt ; streamlit run app.py)
+
+## Week 11 Updates
+
+This week, we expanded the Hotel Revenue Decision Support System with the following features:
+
+- Developed and evaluated a 30-day nightly future booking demand forecasting model.
+- Integrated cancellation risk, occupancy forecasting, and future booking demand into the Streamlit dashboard.
+- Implemented a demand-aware Monte Carlo overbooking simulation.
+- Added policy comparisons under common simulation assumptions.
+- Conducted low-, moderate-, and high-demand stress tests.
+- Performed sensitivity analysis on walk-risk limits and relocation costs.
+- Completed Monte Carlo robustness testing across five random seeds.
+- Incorporated external user feedback requesting more integrated KPI-based decision support.
+
+**Future Demand Model:** Final Test MAE = 5.2187 bookings per hotel-night; R² = 0.4993.
+
+**Limitations:** Results are based on synthetic historical data and exploratory simulation assumptions. The occupancy forecast remains a separate contextual indicator rather than a direct optimization input.

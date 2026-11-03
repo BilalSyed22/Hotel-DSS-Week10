@@ -23,14 +23,59 @@ operational hotel decisions.
 
 import sqlite3
 from pathlib import Path
-
+import numpy as np
 import joblib
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 from overbooking import calculate_dynamic_buffer
+from demand_aware import calculate_demand_aware_buffer
 from wk10_screens import show_predictive_screen
+
+
+
+# ============================================
+# WEEK 11 — OCCUPANCY MODEL LOADER
+# ============================================
+
+@st.cache_resource
+def load_occupancy_model_wk11():
+    model_path = (
+        Path(__file__).resolve().parent
+        / "occupancy_model_wk11.pkl"
+    )
+
+    return joblib.load(model_path)
+
+
+def predict_occupancy_wk11(model_bundle, hotel_id, stay_date):
+    import pandas as pd
+
+    selected_date = pd.Timestamp(stay_date)
+
+    season_map = {
+        12: "Winter", 1: "Winter", 2: "Winter",
+        3: "Spring", 4: "Spring", 5: "Spring",
+        6: "Summer", 7: "Summer", 8: "Summer",
+        9: "Autumn", 10: "Autumn", 11: "Autumn",
+    }
+
+    input_row = pd.DataFrame([{
+        "month": selected_date.month,
+        "week_number": int(selected_date.isocalendar().week),
+        "day_of_month": selected_date.day,
+        "is_weekend": int(selected_date.weekday() >= 5),
+        "year": selected_date.year,
+        "hotel_id": hotel_id,
+        "season": season_map[selected_date.month],
+    }])
+
+    prediction = model_bundle["model"].predict(
+        input_row[model_bundle["features"]]
+    )[0]
+
+    return float(prediction)
 
 
 # ============================================================
@@ -128,6 +173,77 @@ def calculate_predictions(_model, booking_data, feature_names):
     return result
 
 
+@st.cache_resource
+def load_nightly_demand_model():
+    model_path = (
+        Path(__file__).resolve().parent
+        / "nightly_demand_model_wk11.pkl"
+    )
+    return joblib.load(model_path)
+
+
+def predict_nightly_demand(
+    hotel_id,
+    stay_date,
+    capacity_rooms,
+    on_books_30d
+):
+    
+    
+    
+    bundle = load_nightly_demand_model()
+
+    date = pd.Timestamp(stay_date)
+
+    inputs = pd.DataFrame([{
+        "hotel_id": hotel_id,
+        "capacity_rooms": capacity_rooms,
+        "on_books_30d": on_books_30d,
+        "month": date.month,
+        "day_of_week": date.dayofweek,
+        "is_weekend": int(date.dayofweek >= 5),
+    }])
+
+    predicted = bundle["model"].predict(
+        inputs[bundle["features"]]
+    )[0]
+
+    return max(0.0, float(predicted))
+
+
+@st.cache_data
+def load_nightly_demand_data():
+    path = (
+        Path(__file__).resolve().parent
+        / "nightly_future_demand_wk11.csv"
+    )
+
+    df = pd.read_csv(path)
+    df["stay_date"] = pd.to_datetime(df["stay_date"])
+
+    return df
+
+
+def get_nightly_demand_inputs(hotel_id, stay_date):
+    df = load_nightly_demand_data()
+
+    target_date = pd.Timestamp(stay_date).normalize()
+
+    matched = df[
+        (df["hotel_id"] == int(hotel_id))
+        & (df["stay_date"] == target_date)
+    ]
+
+    if len(matched) != 1:
+        return None
+
+    row = matched.iloc[0]
+
+    return {
+        "capacity_rooms": int(row["capacity_rooms"]),
+        "on_books_30d": int(row["on_books_30d"]),
+    }
+
 # ============================================================
 # 4. DATA PROCESSING FUNCTIONS
 # ============================================================
@@ -178,6 +294,53 @@ def get_stay_bookings(bookings, hotel_id, stay_date):
         & (bookings["arrival_date"] <= selected_date)
         & (bookings["checkout_date"] > selected_date)
     ].copy()
+    
+
+def get_bookings_at_forecast_date(
+    bookings,
+    hotel_id,
+    stay_date,
+    days_before=30
+):
+    """
+    Reconstruct reservations active at the
+    historical 30-day-ahead decision date.
+
+    Only includes reservations covering the
+    selected stay night.
+    """
+
+    stay_date = pd.Timestamp(stay_date)
+    forecast_date = (
+        stay_date - pd.Timedelta(days=days_before)
+    )
+
+    result = bookings[
+        (bookings["hotel_id"] == hotel_id)
+        & (bookings["arrival_date"] <= stay_date)
+        & (bookings["checkout_date"] > stay_date)
+    ].copy()
+
+    result["booking_date"] = pd.to_datetime(
+        result["booking_date_id"].astype(str),
+        format="%Y%m%d"
+    )
+
+    result["status_date"] = pd.to_datetime(
+        result["status_date_id"].astype(str),
+        format="%Y%m%d"
+    )
+
+    active = (
+        (result["booking_date"] <= forecast_date)
+        & (
+            (result["is_canceled"] == 0)
+            | (result["status_date"] > forecast_date)
+        )
+    )
+
+    return result.loc[active].copy()
+
 
 
 def prepare_daily_data(daily, hotel_id):
@@ -576,6 +739,291 @@ def show_overbooking_support(
         "assumptions rather than observed property costs."
     )
 
+
+
+    st.subheader("30-Day Future Demand Forecast")
+
+
+    forecast_bookings = get_bookings_at_forecast_date(
+        bookings=bookings,
+        hotel_id=hotel_id,
+        stay_date=selected_date,
+        days_before=30
+    )
+
+    st.caption(
+        "Historical reservations reconstructed as of "
+        "30 days before the selected stay night."
+    )
+
+
+    demand_inputs = get_nightly_demand_inputs(
+        hotel_id,
+        selected_date
+    )
+
+    if demand_inputs is None:
+        st.warning(
+            "No historical 30-day demand snapshot is "
+            "available for this hotel and stay date."
+        )
+    else:
+        
+        snapshot_count = demand_inputs["on_books_30d"]
+        reconstructed_count = len(forecast_bookings)
+
+        st.subheader("Forecast Snapshot Validation")
+
+        v1, v2 = st.columns(2)
+
+        v1.metric(
+            "Dataset On-the-Books",
+            snapshot_count
+        )
+
+        v2.metric(
+            "Reconstructed Active Bookings",
+            reconstructed_count
+        )
+
+        if reconstructed_count != snapshot_count:
+            st.error(
+                "Snapshot mismatch detected. "
+                "Do not run demand-aware simulation "
+                "until the booking populations match."
+            )
+        else:
+            st.success(
+                "Historical booking snapshot matches "
+                "the demand forecasting dataset."
+            )
+
+        
+        predicted_new = predict_nightly_demand(
+            hotel_id=hotel_id,
+            stay_date=selected_date,
+            capacity_rooms=demand_inputs["capacity_rooms"],
+            on_books_30d=demand_inputs["on_books_30d"]
+        )
+
+        estimated_total = (
+            demand_inputs["on_books_30d"]
+            + predicted_new
+        )
+
+        c1, c2, c3 = st.columns(3)
+
+        c1.metric(
+            "On-the-Books at Day -30",
+            demand_inputs["on_books_30d"]
+        )
+
+        c2.metric(
+            "Predicted New Bookings",
+            f"{predicted_new:.1f}"
+        )
+
+        c3.metric(
+            "Projected Booking Volume",
+            f"{estimated_total:.1f}"
+        )
+
+        st.caption(
+            "Projected booking volume is an approximate "
+            "booking-count measure, not realized occupancy. "
+            "It does not subtract future cancellations."
+        )
+
+        st.info(
+            "The demand-aware simulation uses the "
+            "30-day future demand forecast. "
+            "The original Monte Carlo model remains "
+            "available separately for comparison."
+        )
+        
+
+        # ============================================
+        # DEMAND-AWARE MONTE CARLO
+        # ============================================
+
+        st.subheader("Demand-Aware Overbooking Simulation")
+
+        forecast_probs = forecast_bookings[
+            "predicted_cancel_prob"
+        ].to_numpy()
+
+        demand_recommendation, demand_results = (
+            calculate_demand_aware_buffer(
+                cancellation_probs=forecast_probs,
+                capacity=capacity,
+                predicted_new_demand=predicted_new,
+                max_walk_risk=max_walk_risk_pct / 100,
+                max_buffer=250,
+                simulations=SIMULATIONS,
+                seed=RANDOM_SEED,
+                adr=simulation_adr,
+                contribution_margin=contribution_margin / 100,
+                walk_cost_multiplier=walk_multiplier,
+            )
+        )
+
+        d1, d2, d3, d4 = st.columns(4)
+
+        d1.metric(
+            "Additional Booking Limit",
+            demand_recommendation["buffer_k"]
+        )
+
+        d2.metric(
+            "Expected Accepted Bookings",
+            f'{demand_recommendation["expected_accepted_new"]:.1f}'
+        )
+
+        d3.metric(
+            "Simulated Walk Risk",
+            f'{demand_recommendation["walk_probability"]:.2%}'
+        )
+
+        d4.metric(
+            "Expected Total Cost",
+            f'${demand_recommendation["expected_total_cost"]:,.2f}'
+        )
+
+        st.caption(
+            "Experimental 30-day-ahead simulation. "
+            "Future demand follows an assumed Poisson "
+            "distribution. Future booking cancellations "
+            "use an assumed rate. Results are simulated "
+            "scenarios, not validated operational decisions."
+        )
+
+        if not demand_recommendation["feasible"]:
+            st.error(
+                "No evaluated policy satisfies the "
+                "selected walk-risk constraint."
+            )
+        
+        # ============================================
+        # FAIR POLICY COMPARISON
+        # ============================================
+
+        st.subheader("30-Day-Ahead Policy Comparison")
+
+        demand_df = pd.DataFrame(demand_results)
+
+        current_30d = len(forecast_bookings)
+
+        # Policies share the same 30-day snapshot
+        # and demand-aware simulation environment.
+
+        no_overbooking_k = max(
+            0,
+            capacity - current_30d
+        )
+
+        fixed_overbooking_k = max(
+            0,
+            capacity + 5 - current_30d
+        )
+
+        policy_limits = {
+            "Stop Accepting New Bookings": 0,
+            "No Overbooking": no_overbooking_k,
+            "Fixed Overbooking (+5)": fixed_overbooking_k,
+            "Demand-Aware Optimization": int(
+                demand_recommendation["buffer_k"]
+            ),
+        }
+
+
+        # The old model's selected limit is evaluated
+        # as a transferred policy, not as a new optimum.
+        original_limit = int(recommended["buffer_k"]) \
+            if "recommended" in locals() else None
+
+        if original_limit is not None:
+            policy_limits["Original Policy Limit"] = original_limit
+
+        comparison_rows = []
+
+        for name, k in policy_limits.items():
+
+            matched = demand_df.loc[
+                demand_df["buffer_k"] == k
+            ]
+
+            if matched.empty:
+                continue
+
+            result = matched.iloc[0]
+
+            comparison_rows.append({
+                "Policy": name,
+                "Additional Booking Limit": k,
+                "Expected Accepted New": float(
+                    result["expected_accepted_new"]
+                ),
+                "Walk Risk (%)": float(
+                    result["walk_probability"]
+                ) * 100,
+                "Expected Cost ($)": float(
+                    result["expected_total_cost"]
+                ),
+                "Risk Compliant": (
+                    "Yes"
+                    if result["walk_probability"]
+                    <= max_walk_risk_pct / 100
+                    else "No"
+                ),
+            })
+
+        fair_comparison = pd.DataFrame(comparison_rows)
+
+        st.dataframe(
+            fair_comparison.round(2),
+            hide_index=True,
+            use_container_width=True
+        )
+
+        st.caption(
+            "All policies are evaluated using the same "
+            "30-day-ahead booking population, simulated "
+            "future demand, cancellation assumptions, "
+            "room capacity, and financial parameters. "
+            "The original policy limit, when available, "
+            "is transferred into this common scenario."
+        )
+
+    
+
+    # ============================================
+    # WEEK 11 — OCCUPANCY FORECAST
+    # ============================================
+
+    occupancy_bundle = load_occupancy_model_wk11()
+
+    predicted_occupancy = predict_occupancy_wk11(
+        model_bundle=occupancy_bundle,
+        hotel_id=hotel_id,
+        stay_date=selected_date
+    )
+
+    st.subheader("Expected Nightly Occupancy")
+
+    st.metric(
+        "Predicted Occupancy Rate",
+        f"{predicted_occupancy * 100:.1f}%"
+    )
+
+    st.caption(
+        "Calendar-based forecast from the Week 11 "
+        "Gradient Boosting model. Final test MAE: "
+        "11.36 percentage points; R²: 0.0757. "
+        "This forecast is based on synthetic historical "
+        "data and does not incorporate live booking pace."
+    )
+
+
     # --------------------------------------------------------
     # 7.4 RUN MONTE CARLO COST OPTIMIZATION
     # --------------------------------------------------------
@@ -602,6 +1050,124 @@ def show_overbooking_support(
     )
 
     simulation_df = pd.DataFrame(simulation_results)
+    
+    
+    # ============================================
+    # WEEK 11 — OVERBOOKING POLICY COMPARISON
+    # ============================================
+
+    current_bookings = len(date_bookings)
+    fixed_buffer = 5
+
+    # Number of additional reservations allowed
+    no_overbooking_k = max(0, capacity - current_bookings)
+
+    fixed_k = max(
+        0,
+        capacity + fixed_buffer - current_bookings
+    )
+
+    dynamic_k = int(recommended["buffer_k"])
+
+    policies = {
+        "No Overbooking": no_overbooking_k,
+        "Fixed Overbooking (+5)": fixed_k,
+        "Dynamic Optimization": dynamic_k
+    }
+
+    policy_rows = []
+
+    for strategy, k in policies.items():
+
+        match = simulation_df[
+            simulation_df["buffer_k"] == k
+        ]
+
+        if match.empty:
+            st.error(
+                f"Simulation range does not include "
+                f"{strategy} (k={k})."
+            )
+            st.stop()
+
+        result = match.iloc[0]
+
+        risk = float(result["walk_probability"])
+
+        policy_rows.append({
+            "Strategy": strategy,
+            "Additional Bookings": k,
+            "Authorized Limit": current_bookings + k,
+            "Expected Empty Rooms": float(
+                result["expected_empty_rooms"]
+            ),
+            "Expected Walked Rooms": float(
+                result["expected_walked_rooms"]
+            ),
+            "Walk Risk (%)": risk * 100,
+            "Expected Cost ($)": float(
+                result["expected_total_cost"]
+            ),
+            "Risk Compliant": (
+                "Yes" if risk <= max_walk_risk_pct / 100
+                else "No"
+            )
+        })
+
+    policy_df = pd.DataFrame(policy_rows)
+
+    st.subheader("Overbooking Strategy Comparison")
+
+    st.dataframe(
+        policy_df.round(2),
+        hide_index=True,
+        use_container_width=True
+    )
+
+    st.caption(
+        "All three policies use the same Monte Carlo "
+        "simulation assumptions. Expected cost includes "
+        "empty-room opportunity cost and guest relocation "
+        "cost, not complete hotel profit."
+    )
+
+    # Compare dynamic policy with the no-overbooking policy
+    cost_no = policy_df.loc[
+        policy_df["Strategy"] == "No Overbooking",
+        "Expected Cost ($)"
+    ].iloc[0]
+
+    cost_dynamic = policy_df.loc[
+        policy_df["Strategy"] == "Dynamic Optimization",
+        "Expected Cost ($)"
+    ].iloc[0]
+
+    savings = cost_no - cost_dynamic
+
+    st.metric(
+    "Expected Cost Reduction vs. No Overbooking",
+    f"${savings:,.2f}"
+    )
+    
+    st.caption(
+    f"No Overbooking expected cost: ${cost_no:,.2f} | "
+    f"Dynamic expected cost: ${cost_dynamic:,.2f}. "
+    "The difference is simulated cost reduction, "
+    "not guaranteed financial savings."
+    )
+
+    if not recommended.get("feasible", False):
+        st.error(
+            "The dynamic fallback does not satisfy "
+            "the selected walk-risk constraint."
+        )
+
+    st.caption(
+        "Positive cost difference means the dynamic "
+        "policy has lower simulated expected cost. "
+        "It is not a guaranteed real-world saving."
+    )
+
 
     # The function's buffer_k means the additional number
     # of reservations accepted in this simulated scenario.
@@ -619,6 +1185,82 @@ def show_overbooking_support(
     )
 
     walk_risk = recommended["walk_probability"]
+    
+    
+    # ============================================
+    # WEEK 11 — COMBINED DECISION DASHBOARD
+    # ============================================
+
+    st.subheader("Integrated Decision Support")
+
+    m1, m2, m3, m4 = st.columns(4)
+
+    m1.metric(
+        "Predicted Occupancy",
+        f"{predicted_occupancy * 100:.1f}%"
+    )
+
+    m2.metric(
+        "Average Cancellation Risk",
+        f"{np.mean(predicted_probs) * 100:.1f}%"
+        if len(predicted_probs) else "N/A"
+    )
+
+    m3.metric(
+        "Additional Booking Limit",
+        str(additional_bookings)
+    )
+
+    m4.metric(
+        "Simulated Walk Risk",
+        f"{walk_risk * 100:.1f}%"
+    )
+
+    st.caption(
+        "The cancellation model supports arrival "
+        "simulation and booking-limit optimization. "
+        "The occupancy model provides an independent "
+        "calendar-based demand reference. These outputs "
+        "are not added together because that could "
+        "double-count demand."
+    )
+    
+    st.warning(
+        "Demand feasibility has not been validated. "
+        "The Monte Carlo optimization estimates a booking "
+        "authorization limit assuming additional reservations "
+        "can be obtained. The occupancy model provides a "
+        "separate calendar-based forecast and does not "
+        "predict future booking arrivals. Therefore, "
+        "the authorized booking limit should not be interpreted "
+        "as expected demand or a guaranteed revenue outcome."
+    )    
+
+    if recommended.get("feasible") is False:
+        st.error(
+            "No evaluated booking level meets the "
+            "selected walk-risk constraint."
+        )
+    else:
+        st.info(
+            "The booking limit is feasible under the "
+            "selected simulation assumptions. It is not "
+            "a guarantee of future demand or profit."
+        )
+
+    
+    if not recommended["feasible"]:
+        st.error(
+            "No simulated booking policy satisfies the "
+            "selected walk-risk limit. Accepting zero "
+            "additional bookings is only a fallback, "
+            "not a risk-compliant recommendation."
+        )
+    else:
+        st.success(
+            "The recommended booking policy satisfies "
+            "the selected simulated walk-risk constraint."
+        )
 
     # --------------------------------------------------------
     # 7.5 DECISION SUMMARY
@@ -626,10 +1268,19 @@ def show_overbooking_support(
 
     st.subheader("Decision Summary")
 
-    st.write(
-        f"**Simulation recommendation:** Accept up to "
-        f"**{additional_bookings} additional reservations** "
-        f"under the selected assumptions."
+    st.markdown(
+        f"**Simulated booking limit:** "
+        f"Up to {authorized_bookings} total reservations "
+        f"({additional_bookings} more than the current "
+        f"{len(date_bookings)} reservations), "
+        f"subject to the selected assumptions."
+    )
+
+    st.caption(
+        "This is a conditional inventory limit, not a forecast "
+        "that additional demand will materialize. "
+        "Future booking arrivals and cancellation behavior "
+        "have not been independently validated."
     )
 
     d1, d2, d3, d4 = st.columns(4)
@@ -893,3 +1544,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
+

@@ -86,10 +86,24 @@ def calculate_dynamic_buffer(
         if r["walk_probability"] <= max_walk_risk
     ]
 
-    # Minimize expected cost among feasible choices.
-    recommended = min(
-        eligible,
-        key=lambda r: (r["expected_total_cost"], r["buffer_k"])
-    ) if eligible else results[0]
+    
+
+    # Select the lowest-cost policy that satisfies
+    # the walk-risk constraint.
+    if eligible:
+        recommended = min(
+            eligible,
+            key=lambda r: (
+                r["expected_total_cost"],
+                r["buffer_k"]
+            )
+        ).copy()
+
+        recommended["feasible"] = True
+
+    else:
+        # No scenario meets the walk-risk limit.
+        recommended = results[0].copy()
+        recommended["feasible"] = False
 
     return recommended, results
